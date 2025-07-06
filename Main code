@@ -1,0 +1,86 @@
+import cv2
+from cvzone.HandTrackingModule import HandDetector
+from cvzone.ClassificationModule import Classifier
+import numpy as np
+import math
+
+# Load video or use webcam 
+cap = cv2.VideoCapture('0')
+
+# Initialize hand detector and classifier
+detector = HandDetector(maxHands=1)
+classifier = Classifier('model/keras_model.h5', 'model/labels.txt')
+
+offset = 25
+imgsize = 300
+
+# Load label names
+with open('model/labels.txt', 'r') as f:
+    labels = f.read().splitlines()
+
+while True:
+    success, img = cap.read()
+    if not success:
+        break
+
+    img = cv2.resize(img, (480, 480))
+    hands, img = detector.findHands(img)  # Draw=True by default
+
+    if hands:
+        hand = hands[0]
+        x, y, w, h = hand['bbox']
+
+        # Create a white image
+        imgWhite = np.ones((imgsize, imgsize, 3), np.uint8) * 255
+
+        # Crop the hand image with padding
+        x1 = max(0, x - offset)
+        y1 = max(0, y - offset)
+        x2 = min(x + w + offset, img.shape[1])
+        y2 = min(y + h + offset, img.shape[0])
+        imgCrop = img[y1:y2, x1:x2]
+
+        aspectRatio = h / w
+
+        try:
+            if aspectRatio > 1:
+                k = imgsize / h
+                wCal = math.ceil(k * w)
+                imgResize = cv2.resize(imgCrop, (wCal, imgsize))
+                wGap = math.ceil((imgsize - wCal) / 2)
+                imgWhite[:, wGap:wGap + wCal] = imgResize
+            else:
+                k = imgsize / w
+                hCal = math.ceil(k * h)
+                imgResize = cv2.resize(imgCrop, (imgsize, hCal))
+                hGap = math.ceil((imgsize - hCal) / 2)
+                imgWhite[hGap:hGap + hCal, :] = imgResize
+
+            # Get prediction
+            prediction, index = classifier.getPrediction(imgWhite)
+
+            # Use index for label lookup (no list as key!)
+            label = labels[index] if index < len(labels) else str(index)
+            print(f"Prediction: {prediction}  Index: {index}  Label: {label}")
+
+            # Display label on screen
+            cv2.putText(img, f'{label}', (x, y - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 255), 2)
+            cv2.rectangle(img, (x, y), (x + w, y + h),
+                         (255, 0, 255), 2)
+
+            # Show processed images
+            cv2.imshow("Cropped", imgCrop)
+            cv2.imshow("White", imgWhite)
+
+        except Exception as e:
+           print("Processing error:", e)
+
+    # Show final output
+    cv2.imshow("Hand Detection", img)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
